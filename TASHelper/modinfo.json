@@ -1,0 +1,8 @@
+{
+  "id": "CaptainRedstone.TASHelper",
+  "name": "TAS Helper",
+  "version": "1.0.0",
+  "authors": "Captain Redstone",
+  "description": "Adjusts or removes certain random events from the game to avoid desyncs while TASing.",
+  "checksum_override_version": true
+}
