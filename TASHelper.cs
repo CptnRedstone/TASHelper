@@ -19,7 +19,6 @@ namespace TASHelper;
 
 /* TODO OF DOOM
 ----------Important----------
-- Derandomize spear embed distance
 - Random rock/spear spawns needs to either be removed, or be deterministic.
 - Hand determinism breaks on actualization. Possibly also on item pickup. Gah. Need to double-check SlugcatHand code to make sure 0.5 is a good random.
 - Something needs to be done about worm grass... Ideally PRNG based on length.
@@ -27,15 +26,16 @@ namespace TASHelper;
 - Popcorn. Opening is derandomized now but the velocity seems random. Not sure if each pop is random velocity? Definitely starting is messed up, might be random impulse from the spear (if so UHG).
 
 ----------Less but Still Important----------
-- Need to remove water waves caused by rain
 - Freeze vines outside of current room
 - Derandomize various exhaustion stuns
 - Stun item drop RNG
 - Spearmaster needle pulling velocity RNG
 - Regurgitation velocity RNG
+- Rain RNG (cycle type and impulse)
 
 ----------Tech Debt----------
 - Hooks could maybe use a better naming scheme, idk.
+- New logging channel for notifying on On?
 - WHERE IS THE COMPILER WARNING COMING FROM THE DOCUMENTATION IS USELESS
 
 ----------Nice to Have----------
@@ -54,6 +54,7 @@ namespace TASHelper;
 ----------Probably not worth it----------
 - Do we care about piggyback drop RNG? At the moment, neither pups nor coop are TAS-compatible. Idk.
 - Creature eating/Mauling RNV?? Nothing really to eat/maul...
+- Creature pin unstick RNG?
 - BLizard death beam?
 */
 
@@ -84,12 +85,12 @@ public partial class TASHelper : BaseUnityPlugin
         //On.PlayerGraphics.Update += HandsDebug;
         //On.Player.Update += TorsoDebug;
 
+
         Logger.LogInfo("-------------------------INIT-------------------------");
         Logger.LogInfo("-------------------------PLAYER/MOVEMENT-------------------------");
         Logger.LogInfo("Removing arm flail RNG (causes random water waves).");
-            try { IL.SlugcatHand.Update += FindAndFixStandardRNG; } catch (Exception ex) { Logger.LogError(ex); }
-            try { IL.SlugcatHand.Update += FindAndFixRNV; } catch (Exception ex) { Logger.LogError(ex); }
-            try { IL.SlugcatHand.EngageInMovement += FindAndFixStandardRNG; } catch (Exception ex) { Logger.LogError(ex); }
+            try { IL.SlugcatHand.Update += FindAndFixRNVAndRNG; } catch (Exception ex) { Logger.LogError(ex); }
+            try { IL.SlugcatHand.EngageInMovement += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
 
         Logger.LogInfo("Removing randomness from CorridorTurn. I didn't even know that was a thing until now.");
             try { IL.Player.UpdateAnimation += Derandomize_CorridorTurn; } catch (Exception ex) { Logger.LogError(ex); } //Could throw this into an automated function but seems risky for mod compat
@@ -98,32 +99,43 @@ public partial class TASHelper : BaseUnityPlugin
             try { IL.Player.Update += RemoveStuckInversionCheck; } catch (Exception ex) { Logger.LogError(ex); }
 
 
+
+
         Logger.LogInfo("-------------------------OBJECTS/CREATURES-------------------------");
+        Logger.LogInfo("Derandomizing spear embeds.");
+            try { IL.Spear.Update += DerandomizeSpearEmbeds; } catch (Exception ex) { Logger.LogError(ex); }
+
+        Logger.LogInfo("Obliterating Beehives.");
+            On.SporePlant.PlaceInRoom += Delete_SporePlant_PlaceInRoom;
+
         Logger.LogInfo("Freezing certain objects outside of the current room.");
             On.JellyFish.Update += OnlyUpdateJellyfishInRoom;
 
         Logger.LogInfo("Derandomizing popcorn opening.");
             On.SeedCob.Open += Derandomize_SeedCob_Open;
-            try { IL.SeedCob.Update += FindAndFixStandardRNG; } catch (Exception ex) { Logger.LogError(ex); }
+            try { IL.SeedCob.Update += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
 
         Logger.LogInfo("Disabling jellyfish aggression.");
             IL.JellyFish.Update += DisableJellyfishGrasps;
+
+
 
 
         Logger.LogInfo("-------------------------WORLD/ENVIRONMENT-------------------------");
         Logger.LogInfo("Enforcing remix derandomize cycle lengths.");
             IL.World.ctor += Derandomize_CycleTimer;
 
-        Logger.LogInfo("Removing various water wave randomness.");
+        Logger.LogInfo("Removing various water wave randomness. My gosh there's so much randomness, you should see how many ONs this uses.");
             On.Water.Surface.Update += DeleteWaterWaves;
-            try { IL.Water.Surface.Update += FindAndFixPseudoRNV; } catch (Exception ex) { Logger.LogError(ex); }
-            try { IL.Water.Surface.Update += FindAndFixStandardRNG; } catch (Exception ex) { Logger.LogError(ex); }
+            try { IL.Water.Surface.Update += FindAndFixPRNVAndRNG; } catch (Exception ex) { Logger.LogError(ex); }
             On.Water.Surface.GeneralUpsetSurface += Delete_Water_Surface_GeneralUpsetSurface;
             On.Water.Surface.WaterfallHitSurface += Delete_Water_Surface_WaterfallHitSurface;
             On.Water.Surface.DrainAffectSurface += Delete_Water_Surface_DrainAffectSurface;
             On.Water.Surface.Explosion_Explosion += Delete_Water_Surface_Explosion_Explosion;
             On.Water.Surface.Explosion_Vector2_float_float += Delete_Water_Surface_Explosion_Vector2_float_float;
-            try { IL.Water.Ripple += FindAndFixStandardRNG; } catch (Exception ex) { Logger.LogError(ex); }
+            try { IL.Water.Ripple += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
+
+
 
 
         Logger.LogInfo("-------------------------DONE-------------------------");
@@ -154,7 +166,7 @@ public partial class TASHelper : BaseUnityPlugin
 
 
     /*--------------------------------------------------GENERIC/TOOLS--------------------------------------------------*/
-    private void FindAndFixStandardRNG(ILContext il) //Given ILContext, replace all instances of UnityEngine.Random.value with a flat 0.5f. Ideally this should only be used for physics-affecting code, not graphical.
+    private void FindAndFixRNG(ILContext il) //Given ILContext, replace all instances of UnityEngine.Random.value with a flat 0.5f. Ideally this should only be used for physics-affecting code, not graphical.
     {
         try
         {
@@ -170,7 +182,7 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
-    private void FindAndFixRNV(ILContext il)
+    private void FindAndFixRNV(ILContext il) //Given ILContext, replace all instances of RWCustom.Custom.RNV (RaNdom Vector) with [0,0].
     {
         try
         {
@@ -186,8 +198,8 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
-    private void FindAndFixPseudoRNV(ILContext il) //Technically this could be merged with the previous funciton but it's nice to have a bit more granularity.
-    {
+    private void FindAndFixPRNV(ILContext il) //Given ILContext, replace all instances of RNV code that isn't handled in the actual RNV function for some reason.
+    {                                         //Technically this could be merged with the previous funciton but it's nice to have a bit more granularity.
         try
         {
             var cursor = new ILCursor(il);
@@ -220,6 +232,12 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
+    //For some reason when you add a new IL hook to a target function, MonoMod recreates the entire ILContext FROM SCRATCH, instead of just, only running the new hook.
+    //This means any debug statements in a hook start printing per additional hook, even between mods. I don't want duplicated debug, so, we need these stupid aliases.
+    private void FindAndFixRNVAndRNG(ILContext il) { FindAndFixRNV(il); FindAndFixRNG(il); }
+    private void FindAndFixPRNVAndRNV(ILContext il) { FindAndFixPRNV(il); FindAndFixRNV(il); }
+    private void FindAndFixPRNVAndRNG(ILContext il) { FindAndFixPRNV(il); FindAndFixRNG(il); }
+    private void FindAndFixEverything(ILContext il) { FindAndFixPRNV(il); FindAndFixRNV(il); FindAndFixRNG(il); }
 
 
 
@@ -259,6 +277,22 @@ public partial class TASHelper : BaseUnityPlugin
 
 
     /*--------------------------------------------------OBJECTS/CREATURES--------------------------------------------------*/
+    private void DerandomizeSpearEmbeds(ILContext il)
+    {
+        try
+        {
+            var cursor = new ILCursor(il);
+            cursor.GotoNext(MoveType.After,
+                x => x.MatchCall(typeof(UnityEngine.Random), "get_value"),
+                x => x.MatchLdarg(0),
+                x => x.MatchIsinst(nameof(ExplosiveSpear)));
+            cursor.GotoPrev(MoveType.After, x => x.MatchCall(typeof(UnityEngine.Random), "get_value"));
+            cursor.Emit(OpCodes.Pop);
+            cursor.Emit(OpCodes.Ldc_R4, 0f);
+        }
+        catch (Exception ex) { Logger.LogError(ex); }
+    }
+    private void Delete_SporePlant_PlaceInRoom(On.SporePlant.orig_PlaceInRoom orig, SporePlant self, Room placeRoom) { }
     private void OnlyUpdateJellyfishInRoom(On.JellyFish.orig_Update orig, JellyFish self, bool eu)
     {
         if (self.room.PlayersInRoom.Count > 0)
@@ -292,9 +326,8 @@ public partial class TASHelper : BaseUnityPlugin
 
 
     /*--------------------------------------------------WORLD/ENVIRONMENT--------------------------------------------------*/
-    private void Derandomize_CycleTimer(ILContext il)
+    private void Derandomize_CycleTimer(ILContext il) //Trick the game into thinking the remix setting for this is always enabled.
     {
-        //Trick the game into thinking the remix setting for this is always enabled.
         try
         {
             var cursor = new ILCursor(il);
