@@ -19,11 +19,17 @@ namespace TASHelper;
 
 /* TODO OF DOOM
 ----------Important----------
-- Random rock/spear spawns needs to either be removed, or be deterministic.
 - Hand determinism breaks on actualization. Possibly also on item pickup. Gah. Need to double-check SlugcatHand code to make sure 0.5 is a good random.
+    - Maybe related to BiteStruggle? Grasping at straws at this point. Just like slugcat I guess.
+
+- Random rock/spear spawns needs to either be removed, or be deterministic.
 - Something needs to be done about worm grass... Ideally PRNG based on length.
+- RotNG
 - Derandomize item throw angles. Hopefully this isn't per-item (it's probably per-item)
 - Popcorn. Opening is derandomized now but the velocity seems random. Not sure if each pop is random velocity? Definitely starting is messed up, might be random impulse from the spear (if so UHG).
+- oh gosh how am I ever going to handle water flux cycles? If this is doable I should probably reimplement default water waves using the same system...
+
+- Settings! Could use toggle for deterministic random items, or no items (reliablespear individual toggle). Also maybe one for water waves or no water waves.
 
 ----------Less but Still Important----------
 - Freeze vines outside of current room
@@ -32,6 +38,8 @@ namespace TASHelper;
 - Spearmaster needle pulling velocity RNG
 - Regurgitation velocity RNG
 - Rain RNG (cycle type and impulse)
+- Blizzard wind RNG (PhysicalObject)
+- Fix beehives *correctly*
 
 ----------Tech Debt----------
 - Hooks could maybe use a better naming scheme, idk.
@@ -42,6 +50,7 @@ namespace TASHelper;
 - Popcorn freeze opening?
 - Rotfruit stun RNG I guess?
 - Drowning nudge RNG
+- Gourmand empty regurgitate RNG
 - Saint tongue force detatch RNG
 - Saint tongue returning RNV
 - Saint ascension usage RNV (that's a thing?)
@@ -86,11 +95,11 @@ public partial class TASHelper : BaseUnityPlugin
         //On.Player.Update += TorsoDebug;
 
 
-        Logger.LogInfo("-------------------------INIT-------------------------");
         Logger.LogInfo("-------------------------PLAYER/MOVEMENT-------------------------");
-        Logger.LogInfo("Removing arm flail RNG (causes random water waves).");
+        Logger.LogInfo("Removing arm movement RNG (situationally causes random water waves). This took. So long.");
             try { IL.SlugcatHand.Update += FindAndFixRNVAndRNG; } catch (Exception ex) { Logger.LogError(ex); }
             try { IL.SlugcatHand.EngageInMovement += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
+            try { IL.BodyPart.Reset += Derandomize_BodyPart_Reset; } catch (Exception ex) { Logger.LogError(ex); }
 
         Logger.LogInfo("Removing randomness from CorridorTurn. I didn't even know that was a thing until now.");
             try { IL.Player.UpdateAnimation += Derandomize_CorridorTurn; } catch (Exception ex) { Logger.LogError(ex); } //Could throw this into an automated function but seems risky for mod compat
@@ -101,11 +110,12 @@ public partial class TASHelper : BaseUnityPlugin
 
 
 
+
         Logger.LogInfo("-------------------------OBJECTS/CREATURES-------------------------");
         Logger.LogInfo("Derandomizing spear embeds.");
             try { IL.Spear.Update += DerandomizeSpearEmbeds; } catch (Exception ex) { Logger.LogError(ex); }
 
-        Logger.LogInfo("Obliterating Beehives.");
+        Logger.LogInfo("Obliterating Beehives (TEMP PATCH).");
             On.SporePlant.PlaceInRoom += Delete_SporePlant_PlaceInRoom;
 
         Logger.LogInfo("Freezing certain objects outside of the current room.");
@@ -117,6 +127,7 @@ public partial class TASHelper : BaseUnityPlugin
 
         Logger.LogInfo("Disabling jellyfish aggression.");
             IL.JellyFish.Update += DisableJellyfishGrasps;
+
 
 
 
@@ -138,8 +149,10 @@ public partial class TASHelper : BaseUnityPlugin
 
 
 
+
         Logger.LogInfo("-------------------------DONE-------------------------");
     }
+
 
 
 
@@ -161,6 +174,7 @@ public partial class TASHelper : BaseUnityPlugin
         orig(self, eu);
         Logger.LogInfo("Torso: H[" + self.bodyChunks[0].pos.x + "x, " + self.bodyChunks[0].pos.y + "y] T[" + self.bodyChunks[1].pos.x + "x, " + self.bodyChunks[1].pos.y + "y]");
     }
+
 
 
 
@@ -242,7 +256,25 @@ public partial class TASHelper : BaseUnityPlugin
 
 
 
+
     /*--------------------------------------------------PLAYER/MOVEMENT--------------------------------------------------*/
+    private void Derandomize_BodyPart_Reset(ILContext il)
+    {
+        try
+        {
+            FindAndFixEverything(il); //TEMPORARY HACK THAT PROBABLY BREAKS STUFF
+            //var cursor = new ILCursor(il);
+            //cursor.GotoNext(MoveType.After, x => x.MatchStfld(typeof(BodyPart), nameof(BodyPart.pos)));
+            //cursor.EmitDelegate(() =>
+            //{
+            //    if ()
+            //    {
+
+            //    }
+            //});
+        }
+        catch (Exception ex) { Logger.LogError(ex); }
+    }
     private void Derandomize_CorridorTurn(ILContext il)
     {
         try
@@ -272,6 +304,7 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
+
 
 
 
@@ -321,6 +354,7 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
+
 
 
 
