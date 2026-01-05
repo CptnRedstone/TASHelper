@@ -19,9 +19,6 @@ namespace TASHelper;
 
 /* TODO OF DOOM
 ----------Important----------
-- Hand determinism breaks on actualization. Possibly also on item pickup. Gah. Need to double-check SlugcatHand code to make sure 0.5 is a good random.
-    - Maybe related to BiteStruggle? Grasping at straws at this point. Just like slugcat I guess.
-
 - Random rock/spear spawns needs to either be removed, or be deterministic.
 - Something needs to be done about worm grass... Ideally PRNG based on length.
 - RotNG
@@ -29,17 +26,23 @@ namespace TASHelper;
 - Popcorn. Opening is derandomized now but the velocity seems random. Not sure if each pop is random velocity? Definitely starting is messed up, might be random impulse from the spear (if so UHG).
 - oh gosh how am I ever going to handle water flux cycles? If this is doable I should probably reimplement default water waves using the same system...
 
-- Settings! Could use toggle for deterministic random items, or no items (reliablespear individual toggle). Also maybe one for water waves or no water waves.
-
 ----------Less but Still Important----------
+- Oh gosh precycles. PRNG based on cycle number?
 - Freeze vines outside of current room
 - Derandomize various exhaustion stuns
 - Stun item drop RNG
 - Spearmaster needle pulling velocity RNG
-- Regurgitation velocity RNG
 - Rain RNG (cycle type and impulse)
 - Blizzard wind RNG (PhysicalObject)
 - Fix beehives *correctly*
+- Is the green neuron deterministic? Need to check and if not enforce
+
+----------Remix menu----------
+- Creature banner
+- Item banner
+- Flat vs wavy water
+- No items or deterministic items
+- No precycles or deterministic precycles
 
 ----------Tech Debt----------
 - Hooks could maybe use a better naming scheme, idk.
@@ -47,18 +50,21 @@ namespace TASHelper;
 - WHERE IS THE COMPILER WARNING COMING FROM THE DOCUMENTATION IS USELESS
 
 ----------Nice to Have----------
+- Regurgitation item RNG
+- Regurgitation velocity RNG
 - Popcorn freeze opening?
 - Rotfruit stun RNG I guess?
-- Drowning nudge RNG
 - Gourmand empty regurgitate RNG
 - Saint tongue force detatch RNG
-- Saint tongue returning RNV
+- Saint tongue retraction RNV (does this matter?)
 - Saint ascension usage RNV (that's a thing?)
 - Grav flux RNG. No clue what to clamp it to... Cycle timer would be deterministic but would make TASing through hellish. Is freeze until in room possible?
 - Is there a good way to patch iterator movement RNG?
 - DropSpear() (backspear) RNG?
 - Hook super visualizer for better position precision?
+- Non-timer zapcoils should have their flux removed
 - Zapcoil, flamethrower, etc... Not sure how, maybe just disable?
+- Dev tools hotkey for water reset? Not sure how that'd work if waves are enabled...
 
 ----------Probably not worth it----------
 - Do we care about piggyback drop RNG? At the moment, neither pups nor coop are TAS-compatible. Idk.
@@ -99,13 +105,16 @@ public partial class TASHelper : BaseUnityPlugin
         Logger.LogInfo("Removing arm movement RNG (situationally causes random water waves). This took. So long.");
             try { IL.SlugcatHand.Update += FindAndFixRNVAndRNG; } catch (Exception ex) { Logger.LogError(ex); }
             try { IL.SlugcatHand.EngageInMovement += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
-            try { IL.BodyPart.Reset += Derandomize_BodyPart_Reset; } catch (Exception ex) { Logger.LogError(ex); }
+            On.BodyPart.Reset += Derandomize_BodyPart_Reset;
 
         Logger.LogInfo("Removing randomness from CorridorTurn. I didn't even know that was a thing until now.");
             try { IL.Player.UpdateAnimation += Derandomize_CorridorTurn; } catch (Exception ex) { Logger.LogError(ex); } //Could throw this into an automated function but seems risky for mod compat
 
-        Logger.LogInfo("Removing the fix for getting stuck upside-down via a random y nudge. Which doesn't work in the slightest. Which also breaks downward pipe/shortcut determinism. Oh and let's throw it in Update() because why would we ever consider putting movement code in MovementUpdate() or AnimationUpdate()?");
+        Logger.LogInfo("Removing the fix for getting stuck upside-down via a random Y nudge. Which doesn't work in the slightest. Which also breaks downward pipe/shortcut determinism. Oh and let's throw it in Update() because why would we ever consider putting movement code in MovementUpdate() or AnimationUpdate()?");
             try { IL.Player.Update += RemoveStuckInversionCheck; } catch (Exception ex) { Logger.LogError(ex); }
+
+        Logger.LogInfo("Derandomizing drowning panic.");
+            try { IL.Player.LungUpdate += DerandomizeDrowning; } catch (Exception ex) { Logger.LogError(ex); }
 
 
 
@@ -114,9 +123,6 @@ public partial class TASHelper : BaseUnityPlugin
         Logger.LogInfo("-------------------------OBJECTS/CREATURES-------------------------");
         Logger.LogInfo("Derandomizing spear embeds.");
             try { IL.Spear.Update += DerandomizeSpearEmbeds; } catch (Exception ex) { Logger.LogError(ex); }
-
-        Logger.LogInfo("Obliterating Beehives (TEMP PATCH).");
-            On.SporePlant.PlaceInRoom += Delete_SporePlant_PlaceInRoom;
 
         Logger.LogInfo("Freezing certain objects outside of the current room.");
             On.JellyFish.Update += OnlyUpdateJellyfishInRoom;
@@ -247,7 +253,7 @@ public partial class TASHelper : BaseUnityPlugin
         catch (Exception ex) { Logger.LogError(ex); }
     }
     //For some reason when you add a new IL hook to a target function, MonoMod recreates the entire ILContext FROM SCRATCH, instead of just, only running the new hook.
-    //This means any debug statements in a hook start printing per additional hook, even between mods. I don't want duplicated debug, so, we need these stupid aliases.
+    //This means any debug statements in a hook start printing per additional hook, even across mods. I don't want duplicated debug, so, we need these stupid aliases.
     private void FindAndFixRNVAndRNG(ILContext il) { FindAndFixRNV(il); FindAndFixRNG(il); }
     private void FindAndFixPRNVAndRNV(ILContext il) { FindAndFixPRNV(il); FindAndFixRNV(il); }
     private void FindAndFixPRNVAndRNG(ILContext il) { FindAndFixPRNV(il); FindAndFixRNG(il); }
@@ -258,22 +264,15 @@ public partial class TASHelper : BaseUnityPlugin
 
 
     /*--------------------------------------------------PLAYER/MOVEMENT--------------------------------------------------*/
-    private void Derandomize_BodyPart_Reset(ILContext il)
+    private void Derandomize_BodyPart_Reset(On.BodyPart.orig_Reset orig, BodyPart self, Vector2 resetPoint)
     {
-        try
+        self.pos = resetPoint;
+        if (self is not SlugcatHand)
         {
-            FindAndFixEverything(il); //TEMPORARY HACK THAT PROBABLY BREAKS STUFF
-            //var cursor = new ILCursor(il);
-            //cursor.GotoNext(MoveType.After, x => x.MatchStfld(typeof(BodyPart), nameof(BodyPart.pos)));
-            //cursor.EmitDelegate(() =>
-            //{
-            //    if ()
-            //    {
-
-            //    }
-            //});
+            self.pos += RWCustom.Custom.DegToVec(UnityEngine.Random.value * 360f);
         }
-        catch (Exception ex) { Logger.LogError(ex); }
+        self.lastPos = self.pos;
+        self.vel = new Vector2(0f, 0f);
     }
     private void Derandomize_CorridorTurn(ILContext il)
     {
@@ -304,6 +303,24 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
+    private void DerandomizeDrowning(ILContext il)
+    {
+        try
+        {
+            var cursor = new ILCursor(il);
+            while (cursor.TryGotoNext(MoveType.After,                      //So. Drowning's velocity influence has two different variations, depending on whether the room's water is normal or inverted.
+                x => x.MatchCall(typeof(UnityEngine.Random), "get_value"), //There are two differences between each case; the first simply inverts whether you swim upwards or downwards slower. Makes sense.
+                x => x.MatchLdcR4(360),                                    //The other difference? Instead of *adding* velocity with a random direction and amplitude, it *subtracts* it.
+                x => x.MatchMul(),                                         //This is done because of the countless functional differences between random and the inverse of random.
+                x => x.MatchCall(typeof(RWCustom.Custom), nameof(RWCustom.Custom.DegToVec)),
+                x => x.MatchCall(typeof(UnityEngine.Random), "get_value")))
+            {
+                cursor.Emit(OpCodes.Pop);
+                cursor.Emit(OpCodes.Ldc_R4, 0f);
+            }
+        }
+        catch (Exception ex) { Logger.LogError(ex); }
+    }
 
 
 
@@ -325,7 +342,6 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
-    private void Delete_SporePlant_PlaceInRoom(On.SporePlant.orig_PlaceInRoom orig, SporePlant self, Room placeRoom) { }
     private void OnlyUpdateJellyfishInRoom(On.JellyFish.orig_Update orig, JellyFish self, bool eu)
     {
         if (self.room.PlayersInRoom.Count > 0)
