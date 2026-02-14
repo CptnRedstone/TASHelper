@@ -19,10 +19,12 @@ namespace TASHelper;
 
 /* TODO OF DOOM
 ----------Important----------
+- Survivor/Monk intro isn't deterministic. Of course it isn't.
+- Derandomize item throw angles. Weapon rebounds seem random. Can't find other RNG?
+- Campaign start position is random? Maybe shelters too? :rmneedstesting:
 - Random rock/spear spawns needs to either be removed, or be deterministic.
 - Something needs to be done about worm grass... Ideally PRNG based on length.
 - RotNG
-- Derandomize item throw angles. Hopefully this isn't per-item (it's probably per-item)
 - Popcorn. Opening is derandomized now but the velocity seems random. Not sure if each pop is random velocity? Definitely starting is messed up, might be random impulse from the spear (if so UHG).
 - oh gosh how am I ever going to handle water flux cycles? If this is doable I should probably reimplement default water waves using the same system...
 
@@ -34,7 +36,6 @@ namespace TASHelper;
 - Spearmaster needle pulling velocity RNG
 - Rain RNG (cycle type and impulse)
 - Blizzard wind RNG (PhysicalObject)
-- Fix beehives *correctly*
 - Is the green neuron deterministic? Need to check and if not enforce
 
 ----------Remix menu----------
@@ -47,10 +48,12 @@ namespace TASHelper;
 ----------Tech Debt----------
 - Hooks could maybe use a better naming scheme, idk.
 - New logging channel for notifying on On?
-- WHERE IS THE COMPILER WARNING COMING FROM THE DOCUMENTATION IS USELESS
+- IL Nameofs
 
 ----------Nice to Have----------
-- Regurgitation item RNG
+- Fix beehives *correctly*
+- Prevent vulture grubs and hazers from flopping around?
+- Regurgitation item RNG...
 - Regurgitation velocity RNG
 - Popcorn freeze opening?
 - Rotfruit stun RNG I guess?
@@ -102,6 +105,9 @@ public partial class TASHelper : BaseUnityPlugin
 
 
         Logger.LogInfo("-------------------------PLAYER/MOVEMENT-------------------------");
+        Logger.LogInfo("Derandomizing creature (and player) placement randomness. Affects most campaigns' cycle 0s.");
+            try { IL.Creature.PlaceInRoom += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
+
         Logger.LogInfo("Removing arm movement RNG (situationally causes random water waves). This took. So long.");
             try { IL.SlugcatHand.Update += FindAndFixRNVAndRNG; } catch (Exception ex) { Logger.LogError(ex); }
             try { IL.SlugcatHand.EngageInMovement += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
@@ -113,7 +119,7 @@ public partial class TASHelper : BaseUnityPlugin
         Logger.LogInfo("Removing the fix for getting stuck upside-down via a random Y nudge. Which doesn't work in the slightest. Which also breaks downward pipe/shortcut determinism. Oh and let's throw it in Update() because why would we ever consider putting movement code in MovementUpdate() or AnimationUpdate()?");
             try { IL.Player.Update += RemoveStuckInversionCheck; } catch (Exception ex) { Logger.LogError(ex); }
 
-        Logger.LogInfo("Derandomizing drowning panic.");
+        Logger.LogInfo("Removing drowning panic.");
             try { IL.Player.LungUpdate += DerandomizeDrowning; } catch (Exception ex) { Logger.LogError(ex); }
 
 
@@ -199,6 +205,22 @@ public partial class TASHelper : BaseUnityPlugin
                 i++;
             }
             Logger.LogDebug("Automatically found and replaced " + i + " RNG call(s) in " + il.Method.Name);
+        }
+        catch (Exception ex) { Logger.LogError(ex); }
+    }
+    private void FindAndFixRangeNG(ILContext il) //Given ILContext, replace all instances of UnityEngine.Random.Range() with a flat 0. This can cause unexpected results, maybe TODO average inputs?
+    {
+        try
+        {
+            var cursor = new ILCursor(il);
+            int i = 0;
+            while (cursor.TryGotoNext(MoveType.After, x => x.MatchCall(typeof(UnityEngine.Random), nameof(UnityEngine.Random.Range)))) //Where's the MatchCall documentation? I want my half hour back.
+            {
+                cursor.Emit(OpCodes.Pop);
+                cursor.Emit(OpCodes.Ldc_I4, 0);
+                i++;
+            }
+            Logger.LogDebug("Automatically found and replaced " + i + " RangeNG call(s) in " + il.Method.Name);
         }
         catch (Exception ex) { Logger.LogError(ex); }
     }
@@ -311,7 +333,7 @@ public partial class TASHelper : BaseUnityPlugin
             while (cursor.TryGotoNext(MoveType.After,                      //So. Drowning's velocity influence has two different variations, depending on whether the room's water is normal or inverted.
                 x => x.MatchCall(typeof(UnityEngine.Random), "get_value"), //There are two differences between each case; the first simply inverts whether you swim upwards or downwards slower. Makes sense.
                 x => x.MatchLdcR4(360),                                    //The other difference? Instead of *adding* velocity with a random direction and amplitude, it *subtracts* it.
-                x => x.MatchMul(),                                         //This is done because of the countless functional differences between random and the inverse of random.
+                x => x.MatchMul(),                                         //This is done because of the countless functional differences between 360° random, and 360° random rotated 180°.
                 x => x.MatchCall(typeof(RWCustom.Custom), nameof(RWCustom.Custom.DegToVec)),
                 x => x.MatchCall(typeof(UnityEngine.Random), "get_value")))
             {
