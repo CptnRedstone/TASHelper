@@ -101,7 +101,7 @@ public partial class TASHelper : BaseUnityPlugin
 
 
         //On.PlayerGraphics.Update += HandsDebug;
-        //On.Player.Update += TorsoDebug;
+        On.Player.Update += TorsoDebug;
 
 
         Logger.LogInfo("-------------------------PLAYER/MOVEMENT-------------------------");
