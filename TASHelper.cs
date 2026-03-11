@@ -131,6 +131,7 @@ public partial class TASHelper : BaseUnityPlugin
             try { IL.Spear.Update += DerandomizeSpearEmbeds; } catch (Exception ex) { Logger.LogError(ex); }
 
         Logger.LogInfo("Freezing certain objects outside of the current room.");
+            On.DangleFruit.Update += OnlyUpdateDanglefruitInRoom;
             On.JellyFish.Update += OnlyUpdateJellyfishInRoom;
 
         Logger.LogInfo("Derandomizing popcorn opening.");
@@ -363,6 +364,13 @@ public partial class TASHelper : BaseUnityPlugin
             cursor.Emit(OpCodes.Ldc_R4, 0f);
         }
         catch (Exception ex) { Logger.LogError(ex); }
+    }
+    private void OnlyUpdateDanglefruitInRoom(On.DangleFruit.orig_Update orig, DangleFruit self, bool eu)
+    {
+        if (self.room.PlayersInRoom.Count > 0)
+        {
+            orig(self, eu);
+        }
     }
     private void OnlyUpdateJellyfishInRoom(On.JellyFish.orig_Update orig, JellyFish self, bool eu)
     {
