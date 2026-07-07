@@ -5,7 +5,6 @@ using UnityEngine;
 using BepInEx;
 using MonoMod.Cil;
 using Mono.Cecil.Cil;
-using System.Collections.Generic;
 
 #pragma warning disable CS0618
 
@@ -19,7 +18,8 @@ namespace TASHelper;
 
 /* TODO OF DOOM
 ----------Important----------
-- Survivor/Monk intro isn't deterministic. Of course it isn't.
+- Freeze other types of items when not in the room, like glow weed and such.
+- Instead of freeze maybe force update until settled?
 - Derandomize item throw angles. Weapon rebounds seem random. Can't find other RNG?
 - Campaign start position is random? Maybe shelters too? :rmneedstesting:
 - Random rock/spear spawns needs to either be removed, or be deterministic.
@@ -51,6 +51,8 @@ namespace TASHelper;
 - IL Nameofs
 
 ----------Nice to Have----------
+- Movement marker integration? Stuff like pole side, "grounded", etc.
+- Dev V RNG
 - Fix beehives *correctly*
 - Prevent vulture grubs and hazers from flopping around?
 - Regurgitation item RNG...
@@ -99,12 +101,38 @@ public partial class TASHelper : BaseUnityPlugin
         }
         catch (Exception ex) { Logger.LogError(ex); }
 
+        //On.Player.Update += delegate(On.Player.orig_Update orig, Player self, bool eu)
+        //{
+        //    orig(self, eu);
+        //    Logger.LogDebug("Should Enter LedgeGrab: " + (self.bodyChunks[0].ContactPoint.x == self.input[0].x && self.input[0].x != 0 && self.bodyChunks[0].pos.y > self.room.MiddleOfTile(self.room.GetTilePosition(self.bodyChunks[0].pos)).y && (self.bodyMode == Player.BodyModeIndex.Default || self.bodyMode == Player.BodyModeIndex.WallClimb) && !self.IsTileSolid(0, -self.input[0].x, 0) && !self.IsTileSolid(0, 0, -2) && !self.IsTileSolid(0, self.input[0].x, 1)));
+        //    Logger.LogDebug("Should Exit LedgeGrab: " + (self.IsTileSolid(0, self.flipDirection, 0) && !self.IsTileSolid(0, self.flipDirection, 1)));
+        //};
+        //IL.Player.UpdateAnimation += delegate (ILContext il)
+        //{
+        //    try
+        //    {
+        //        ILCursor cursor = new(il);
+
+        //        cursor.GotoNext(MoveType.After,
+        //            x => x.MatchLdarg(0),
+        //            x => x.MatchLdfld(typeof(Player), nameof(Player.animation)),
+        //            x => x.MatchLdsfld(typeof(Player.AnimationIndex), nameof(Player.AnimationIndex.StandUp)),
+        //            x => x.MatchCall(typeof(ExtEnum<Player.AnimationIndex>).GetMethod("op_Equality")),
+        //            x => x.MatchBrfalse(out _));
+        //        cursor.EmitDelegate(delegate() { Logger.LogMessage("STANDUP CODE TRIGGERED"); });
+
+        //    }
+        //    catch (Exception ex) { Logger.LogFatal(ex); }
+        //};
+
+
+
 
         //On.PlayerGraphics.Update += HandsDebug;
         On.Player.Update += TorsoDebug;
 
 
-        Logger.LogInfo("-------------------------PLAYER/MOVEMENT-------------------------");
+        Logger.LogMessage("-------------------------PLAYER/MOVEMENT-------------------------");
         Logger.LogInfo("Derandomizing creature (and player) placement randomness. Affects most campaigns' cycle 0s.");
             try { IL.Creature.PlaceInRoom += FindAndFixRNG; } catch (Exception ex) { Logger.LogError(ex); }
 
@@ -126,7 +154,7 @@ public partial class TASHelper : BaseUnityPlugin
 
 
 
-        Logger.LogInfo("-------------------------OBJECTS/CREATURES-------------------------");
+        Logger.LogMessage("-------------------------OBJECTS/CREATURES-------------------------");
         Logger.LogInfo("Derandomizing spear embeds.");
             try { IL.Spear.Update += DerandomizeSpearEmbeds; } catch (Exception ex) { Logger.LogError(ex); }
 
@@ -145,7 +173,7 @@ public partial class TASHelper : BaseUnityPlugin
 
 
 
-        Logger.LogInfo("-------------------------WORLD/ENVIRONMENT-------------------------");
+        Logger.LogMessage("-------------------------WORLD/ENVIRONMENT-------------------------");
         Logger.LogInfo("Enforcing remix derandomize cycle lengths.");
             IL.World.ctor += Derandomize_CycleTimer;
 
@@ -163,7 +191,14 @@ public partial class TASHelper : BaseUnityPlugin
 
 
 
-        Logger.LogInfo("-------------------------DONE-------------------------");
+        Logger.LogMessage("-------------------------Other/Misc-------------------------");
+        Logger.LogInfo("Unlocking dev tools in challenge mode. This is supposed to happen automatically when you beat all challenges but I think it's broken?");
+            IL.RainWorldGame.RawUpdate += UnlockChallengeDevtools;
+
+
+
+
+        Logger.LogMessage("-------------------------DONE-------------------------");
     }
 
 
@@ -179,13 +214,13 @@ public partial class TASHelper : BaseUnityPlugin
     }
     private void HandsDebug(On.PlayerGraphics.orig_Update orig, PlayerGraphics self)
     {
-        orig(self);
-        Logger.LogInfo("Hands: L[" + self.hands[0].pos.x + "x, " + self.hands[0].pos.y + "y] R[" + self.hands[1].pos.x + "x, " + self.hands[1].pos.y + "y]");
+        orig(self); //These only actually go to 4 and 3 decimal places respectively. Not sure why, can't be bothered to find out right now. Maybe Unity Vector2 wanting to be magnitude/direction?
+        Logger.LogInfo("Hands: L[" + self.hands[0].pos.x.ToString("0.0000") + "x, " + self.hands[0].pos.y.ToString("0.000") + "y] R[" + self.hands[1].pos.x.ToString("0.0000") + "x, " + self.hands[1].pos.y.ToString("0.000") + "y]");
     }
     private void TorsoDebug(On.Player.orig_Update orig, Player self, bool eu)
     {
         orig(self, eu);
-        Logger.LogInfo("Torso: H[" + self.bodyChunks[0].pos.x + "x, " + self.bodyChunks[0].pos.y + "y] T[" + self.bodyChunks[1].pos.x + "x, " + self.bodyChunks[1].pos.y + "y]");
+        Logger.LogInfo("Torso: H[" + self.bodyChunks[0].pos.x.ToString("0.0000") + "x, " + self.bodyChunks[0].pos.y.ToString("0.000") + "y] T[" + self.bodyChunks[1].pos.x.ToString("0.0000") + "x, " + self.bodyChunks[1].pos.y.ToString("0.000") + "y]");
     }
 
 
@@ -281,7 +316,23 @@ public partial class TASHelper : BaseUnityPlugin
     private void FindAndFixPRNVAndRNV(ILContext il) { FindAndFixPRNV(il); FindAndFixRNV(il); }
     private void FindAndFixPRNVAndRNG(ILContext il) { FindAndFixPRNV(il); FindAndFixRNG(il); }
     private void FindAndFixEverything(ILContext il) { FindAndFixPRNV(il); FindAndFixRNV(il); FindAndFixRNG(il); }
+    private void UnlockChallengeDevtools(ILContext il)
+    {
+        try
+        {
+            ILCursor cursor = new(il);
+            ILLabel enableDevTools = cursor.DefineLabel();
 
+            cursor.GotoNext(MoveType.After,
+                x => x.MatchLdarg(0),
+                x => x.MatchCall(typeof(RainWorldGame), "get_GetArenaGameSession"),
+                x => x.MatchLdfld(typeof(ArenaGameSession), nameof(ArenaGameSession.chMeta)),
+                x => x.MatchBrfalse(out enableDevTools));
+
+            cursor.Emit(OpCodes.Br, enableDevTools);
+        }
+        catch (Exception ex) { Logger.LogError(ex); }
+    }
 
 
 
